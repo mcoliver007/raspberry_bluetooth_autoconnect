@@ -116,7 +116,14 @@ while true; do
                 done
 
                 # Confirmation vocale sur l'enceinte fraîchement connectée
-                if command -v espeak-ng >/dev/null 2>&1; then
+                # pico2wave (SVOX Pico) a un rendu bien plus naturel qu'espeak-ng,
+                # qu'on garde en repli si pico2wave n'est pas installé.
+                if command -v pico2wave >/dev/null 2>&1; then
+                    TTS_WAV=$(mktemp --suffix=.wav)
+                    pico2wave -l fr-FR -w "$TTS_WAV" "Connexion à l'enceinte réussie" 2>/dev/null
+                    paplay --device="$SINK" "$TTS_WAV"
+                    rm -f "$TTS_WAV"
+                elif command -v espeak-ng >/dev/null 2>&1; then
                     TTS_WAV=$(mktemp --suffix=.wav)
                     espeak-ng -v fr -w "$TTS_WAV" "Connexion à l'enceinte réussie" 2>/dev/null
                     paplay --device="$SINK" "$TTS_WAV"
