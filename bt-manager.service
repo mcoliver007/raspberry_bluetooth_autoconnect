@@ -1,0 +1,31 @@
+[Unit]
+Description=Gestion automatique des enceintes Bluetooth
+After=bluetooth.service
+Requires=bluetooth.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/home/pi/bt-manager.sh
+Restart=always
+
+# Désactiver la sandbox systemd
+PrivateTmp=no
+ProtectSystem=off
+ProtectHome=off
+PrivateDevices=no
+
+# Autoriser l'accès au contrôleur Bluetooth
+DeviceAllow=/dev/hci0 rw
+# Autoriser l'accès aux devices USB
+DeviceAllow=/dev/bus/usb/ rw
+
+# Autoriser les capabilities nécessaires à hciconfig
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+
+# Autoriser PulseAudio
+Environment="PULSE_RUNTIME_PATH=/run/user/0/pulse"
+
+[Install]
+WantedBy=multi-user.target
