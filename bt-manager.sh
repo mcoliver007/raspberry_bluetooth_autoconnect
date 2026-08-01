@@ -116,19 +116,27 @@ while true; do
                 done
 
                 # Confirmation vocale sur l'enceinte fraîchement connectée.
-                # La voix MBROLA (mbrola-fr4, par concaténation de diphones) sonne
-                # bien plus naturelle que la synthèse par formants d'espeak-ng seul.
-                if command -v espeak-ng >/dev/null 2>&1 && espeak-ng --voices=mb 2>/dev/null | grep -q mb-fr4; then
+                # gTTS (Google TTS) a un rendu bien plus naturel qu'espeak-ng, mais
+                # nécessite Internet : on retombe sur espeak-ng puis un bip si
+                # gTTS/le réseau n'est pas disponible.
+                VOICE_MSG="Connexion à l'enceinte réussie"
+                VOICE_DONE=false
+                if command -v gtts-cli >/dev/null 2>&1 && command -v mpg123 >/dev/null 2>&1; then
+                    TTS_MP3=$(mktemp --suffix=.mp3)
+                    if gtts-cli -l fr "$VOICE_MSG" -o "$TTS_MP3" 2>/dev/null; then
+                        PULSE_SINK="$SINK" mpg123 -q "$TTS_MP3" 2>/dev/null
+                        VOICE_DONE=true
+                    fi
+                    rm -f "$TTS_MP3"
+                fi
+                if [ "$VOICE_DONE" = false ] && command -v espeak-ng >/dev/null 2>&1; then
                     TTS_WAV=$(mktemp --suffix=.wav)
-                    espeak-ng -v mb-fr4 -w "$TTS_WAV" "Connexion à l'enceinte réussie" 2>/dev/null
+                    espeak-ng -v fr -w "$TTS_WAV" "$VOICE_MSG" 2>/dev/null
                     paplay --device="$SINK" "$TTS_WAV"
                     rm -f "$TTS_WAV"
-                elif command -v espeak-ng >/dev/null 2>&1; then
-                    TTS_WAV=$(mktemp --suffix=.wav)
-                    espeak-ng -v fr -w "$TTS_WAV" "Connexion à l'enceinte réussie" 2>/dev/null
-                    paplay --device="$SINK" "$TTS_WAV"
-                    rm -f "$TTS_WAV"
-                elif [ -f /usr/share/sounds/alsa/Front_Center.wav ]; then
+                    VOICE_DONE=true
+                fi
+                if [ "$VOICE_DONE" = false ] && [ -f /usr/share/sounds/alsa/Front_Center.wav ]; then
                     paplay --device="$SINK" /usr/share/sounds/alsa/Front_Center.wav
                 fi
 
