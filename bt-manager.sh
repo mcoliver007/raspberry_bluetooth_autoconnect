@@ -80,7 +80,9 @@ while true; do
 
     CONNECTED=false
     # Lecture du fichier de préférences
-    while read MAC; do
+    while read -r RAW_LINE; do
+        # Retirer tout commentaire inline (# et ce qui suit), puis les espaces de bord
+        MAC=$(echo "$RAW_LINE" | sed 's/#.*//' | xargs)
         [[ "$MAC" =~ ^#.*$ || -z "$MAC" ]] && continue
         log "DEBUG: test de la MAC préférée : $MAC"
         if echo "$DEVICES" | grep -qi "$MAC"; then
