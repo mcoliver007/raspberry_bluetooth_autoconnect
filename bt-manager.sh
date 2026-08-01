@@ -104,6 +104,13 @@ while true; do
                 pactl set-default-sink "$SINK"
                 log "Profil A2DP activé pour $MAC"
 
+                # Le sink A2DP met lui aussi quelques instants à apparaître
+                # après le changement de profil de la carte.
+                for attempt in 1 2 3 4 5; do
+                    pactl list sinks short | grep -q "$SINK" && break
+                    sleep 1
+                done
+
                 # Confirmation vocale sur l'enceinte fraîchement connectée
                 if command -v espeak-ng >/dev/null 2>&1; then
                     TTS_WAV=$(mktemp --suffix=.wav)
