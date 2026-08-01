@@ -17,9 +17,10 @@ log "DEBUG: test hciconfig=$(which hciconfig)"
 # PulseAudio
 pulseaudio --start
 sleep 2
-pactl load-module module-bluetooth-discover
-pactl load-module module-bluetooth-profiles
-pactl load-module module-bluetooth-policy
+# module-bluetooth-discover charge et gère lui-même les profils/la politique
+# Bluetooth ; les modules séparés module-bluetooth-profiles/-policy n'existent
+# plus dans les versions récentes de PulseAudio.
+pactl list modules short | grep -q module-bluetooth-discover || pactl load-module module-bluetooth-discover
 log "Modules PulseAudio Bluetooth chargés."
 
 while true; do
@@ -91,8 +92,16 @@ while true; do
             sleep 3
             if bluetoothctl info $MAC | grep -q "Connected: yes"; then
                 log "Connexion réussie : $MAC"
-                pactl set-card-profile bluez_card.${MAC//:/_} a2dp-sink
-                pactl set-default-sink bluez_sink.${MAC//:/_}.a2dp_sink
+                CARD="bluez_card.${MAC//:/_}"
+                SINK="bluez_sink.${MAC//:/_}.a2dp_sink"
+                # PulseAudio met quelques secondes à enregistrer la carte/le sink
+                # Bluetooth après la connexion : on réessaie avant d'abandonner.
+                for attempt in 1 2 3 4 5; do
+                    pactl list cards short | grep -q "$CARD" && break
+                    sleep 1
+                done
+                pactl set-card-profile "$CARD" a2dp-sink
+                pactl set-default-sink "$SINK"
                 log "Profil A2DP activé pour $MAC"
                 CONNECTED=true
                 break
