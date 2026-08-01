@@ -107,7 +107,7 @@ while true; do
                 # Confirmation vocale sur l'enceinte fraîchement connectée
                 if command -v espeak-ng >/dev/null 2>&1; then
                     TTS_WAV=$(mktemp --suffix=.wav)
-                    espeak-ng -v fr -w "$TTS_WAV" "Connexion à l'enceinte réussite" 2>/dev/null
+                    espeak-ng -v fr -w "$TTS_WAV" "Connexion à l'enceinte réussie" 2>/dev/null
                     paplay --device="$SINK" "$TTS_WAV"
                     rm -f "$TTS_WAV"
                 elif [ -f /usr/share/sounds/alsa/Front_Center.wav ]; then
