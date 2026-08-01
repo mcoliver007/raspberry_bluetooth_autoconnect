@@ -2,6 +2,10 @@
 PREF_FILE="/home/pi/.config/bt-preferred.conf"
 LOG_FILE="/var/log/bt-manager.log"
 
+# Pointe pactl/pulseaudio vers la session PulseAudio réelle de l'utilisateur
+# pi (déjà lancée à la connexion), au lieu d'en créer une jetable dans /tmp.
+export XDG_RUNTIME_DIR="/run/user/$(id -u pi)"
+
 log() {
     echo "[bt-manager] $1" | tee -a "$LOG_FILE"
     logger -t bt-manager -- "$1"
