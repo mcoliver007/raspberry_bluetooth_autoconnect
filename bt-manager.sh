@@ -4,7 +4,7 @@ LOG_FILE="/var/log/bt-manager.log"
 
 log() {
     echo "[bt-manager] $1" | tee -a "$LOG_FILE"
-    logger -t bt-manager "$1"
+    logger -t bt-manager -- "$1"
 }
 
 trap 'log "Arrêt demandé par systemd — bt-manager se termine proprement."; exit 0' TERM
