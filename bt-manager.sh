@@ -115,12 +115,12 @@ while true; do
                     sleep 1
                 done
 
-                # Confirmation vocale sur l'enceinte fraîchement connectée
-                # pico2wave (SVOX Pico) a un rendu bien plus naturel qu'espeak-ng,
-                # qu'on garde en repli si pico2wave n'est pas installé.
-                if command -v pico2wave >/dev/null 2>&1; then
+                # Confirmation vocale sur l'enceinte fraîchement connectée.
+                # La voix MBROLA (mbrola-fr4, par concaténation de diphones) sonne
+                # bien plus naturelle que la synthèse par formants d'espeak-ng seul.
+                if command -v espeak-ng >/dev/null 2>&1 && espeak-ng --voices=mb 2>/dev/null | grep -q mb-fr4; then
                     TTS_WAV=$(mktemp --suffix=.wav)
-                    pico2wave -l fr-FR -w "$TTS_WAV" "Connexion à l'enceinte réussie" 2>/dev/null
+                    espeak-ng -v mb-fr4 -w "$TTS_WAV" "Connexion à l'enceinte réussie" 2>/dev/null
                     paplay --device="$SINK" "$TTS_WAV"
                     rm -f "$TTS_WAV"
                 elif command -v espeak-ng >/dev/null 2>&1; then
