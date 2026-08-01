@@ -104,8 +104,13 @@ while true; do
                 pactl set-default-sink "$SINK"
                 log "Profil A2DP activé pour $MAC"
 
-                # Petit son de confirmation sur l'enceinte fraîchement connectée
-                if [ -f /usr/share/sounds/alsa/Front_Center.wav ]; then
+                # Confirmation vocale sur l'enceinte fraîchement connectée
+                if command -v espeak-ng >/dev/null 2>&1; then
+                    TTS_WAV=$(mktemp --suffix=.wav)
+                    espeak-ng -v fr -w "$TTS_WAV" "Connexion à l'enceinte réussite" 2>/dev/null
+                    paplay --device="$SINK" "$TTS_WAV"
+                    rm -f "$TTS_WAV"
+                elif [ -f /usr/share/sounds/alsa/Front_Center.wav ]; then
                     paplay --device="$SINK" /usr/share/sounds/alsa/Front_Center.wav
                 fi
 
