@@ -6,6 +6,7 @@ Requires=bluetooth.service
 [Service]
 Type=simple
 User=pi
+Environment="XDG_RUNTIME_DIR=/run/user/%U"
 ExecStart=/home/pi/raspberry_bluetooth_autoconnect/bt-manager.sh
 Restart=always
 
