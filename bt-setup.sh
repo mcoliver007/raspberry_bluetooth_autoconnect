@@ -12,43 +12,44 @@ need_cmd() {
 
 need_cmd bluetoothctl
 need_cmd pactl
-need_cmd hcitool
-need_cmd sudo
 
+# hcitool voit bien l'interface BR/EDR d'une enceinte au niveau radio, mais
+# ne la fait pas connaître à bluetoothd : bluetoothctl pair/trust/connect
+# répondent alors "not available" faute d'objet D-Bus enregistré. Il faut
+# que la découverte passe par bluetoothctl lui-même pour que bluetoothd
+# enregistre réellement l'appareil. Le scan "auto" par défaut de
+# bluetoothctl favorise le LE et rate souvent la fenêtre d'annonce BR/EDR
+# courte de certaines enceintes en mode pairing ; on force donc le
+# transport en "bredr" pour une passe dédiée, répétée plusieurs fois.
 echo "=== Découverte Bluetooth classique (BR/EDR) ==="
-# hcitool nécessite les capacités CAP_NET_ADMIN/CAP_NET_RAW ; on l'exécute
-# via sudo pour cette seule commande, plutôt que de lancer tout le script en
-# root — ce qui casserait l'accès à la session PulseAudio réelle de l'utilisateur.
-# bluetoothctl "scan on" est peu fiable pour détecter l'interface classique
-# d'une enceinte (certaines n'annoncent leur MAC BR/EDR que pendant une
-# fenêtre courte de leur mode pairing, parfois manquée). hcitool scan fait
-# une inquiry classique directe, plus fiable ici ; on la répète plusieurs
-# fois car la fenêtre d'annonce peut être ratée une fois sur deux.
-declare -A BREDR_NAMES
 for attempt in $(seq 1 "$BREDR_SCAN_ATTEMPTS"); do
     echo "  tentative $attempt/$BREDR_SCAN_ATTEMPTS…"
-    while IFS=$'\t' read -r MAC NAME; do
-        [ -z "$MAC" ] && continue
-        [ "$NAME" = "n/a" ] && continue
-        BREDR_NAMES["$MAC"]="$NAME"
-    done < <(sudo hcitool scan --flush 2>/dev/null | tail -n +2)
+    {
+        echo "menu scan"
+        echo "transport bredr"
+        echo "back"
+        echo "scan on"
+        sleep "$SCAN_DURATION"
+        echo "scan off"
+        echo "quit"
+    } | bluetoothctl >/dev/null 2>&1
 done
 
 echo
 echo "=== Découverte Bluetooth basse consommation (BLE, pour information) ==="
 stdbuf -oL -eL bluetoothctl --timeout "$SCAN_DURATION" scan on >/dev/null 2>&1
-mapfile -t LE_LINES < <(bluetoothctl devices | sort -u)
+
+mapfile -t ALL_LINES < <(bluetoothctl devices | sort -u)
 
 DEVICES=()
-for MAC in "${!BREDR_NAMES[@]}"; do
-    DEVICES+=("$MAC"$'\t'"${BREDR_NAMES[$MAC]}"$'\t'"classique")
-done
-for line in "${LE_LINES[@]}"; do
+for line in "${ALL_LINES[@]}"; do
     MAC=$(echo "$line" | awk '{print $2}')
     NAME=$(echo "$line" | cut -d' ' -f3-)
-    # Ne pas dupliquer une MAC déjà trouvée en classique
-    [ -n "${BREDR_NAMES[$MAC]:-}" ] && continue
-    DEVICES+=("$MAC"$'\t'"$NAME"$'\t'"LE")
+    if [[ "$NAME" == LE-* ]]; then
+        DEVICES+=("$MAC"$'\t'"$NAME"$'\t'"LE")
+    else
+        DEVICES+=("$MAC"$'\t'"$NAME"$'\t'"classique")
+    fi
 done
 
 if [ "${#DEVICES[@]}" -eq 0 ]; then
