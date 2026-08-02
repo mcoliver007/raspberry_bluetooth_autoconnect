@@ -4,7 +4,6 @@
 set -u
 
 SCAN_DURATION=8
-BREDR_SCAN_ATTEMPTS=4
 
 need_cmd() {
     command -v "$1" >/dev/null 2>&1 || { echo "Commande manquante: $1"; exit 1; }
@@ -12,32 +11,41 @@ need_cmd() {
 
 need_cmd bluetoothctl
 need_cmd pactl
+need_cmd mkfifo
 
-# hcitool voit bien l'interface BR/EDR d'une enceinte au niveau radio, mais
-# ne la fait pas connaître à bluetoothd : bluetoothctl pair/trust/connect
-# répondent alors "not available" faute d'objet D-Bus enregistré. Il faut
-# que la découverte passe par bluetoothctl lui-même pour que bluetoothd
-# enregistre réellement l'appareil. Le scan "auto" par défaut de
-# bluetoothctl favorise le LE et rate souvent la fenêtre d'annonce BR/EDR
-# courte de certaines enceintes en mode pairing ; on force donc le
-# transport en "bredr" pour une passe dédiée, répétée plusieurs fois.
-echo "=== Découverte Bluetooth classique (BR/EDR) ==="
-for attempt in $(seq 1 "$BREDR_SCAN_ATTEMPTS"); do
-    echo "  tentative $attempt/$BREDR_SCAN_ATTEMPTS…"
-    {
-        echo "menu scan"
-        echo "transport bredr"
-        echo "back"
-        echo "scan on"
-        sleep "$SCAN_DURATION"
-        echo "scan off"
-        echo "quit"
-    } | bluetoothctl >/dev/null 2>&1
-done
+# BlueZ ne garde en mémoire un appareil découvert (mais pas encore appairé)
+# que temporairement : peu après l'arrêt du scan, l'objet est purgé et
+# bluetoothctl pair/trust/connect répondent "not available". On garde donc
+# le scan actif en tâche de fond (transport bredr, plus fiable que "auto"
+# pour l'interface classique d'une enceinte en mode pairing) pendant toute
+# la sélection interactive, et on ne l'arrête qu'au moment de lancer le
+# pairing sur l'appareil choisi, pour ne pas laisser de trou de latence.
+BT_FIFO=$(mktemp -u)
+mkfifo "$BT_FIFO"
+exec 3<>"$BT_FIFO"
+bluetoothctl >/dev/null 2>&1 <&3 &
+BT_CTL_PID=$!
+cleanup_scan() {
+    exec 3>&- 2>/dev/null
+    rm -f "$BT_FIFO"
+}
+stop_scan() {
+    echo "scan off" >&3
+    echo "quit" >&3
+    wait "$BT_CTL_PID" 2>/dev/null
+    cleanup_scan
+}
+trap 'stop_scan' EXIT
 
-echo
-echo "=== Découverte Bluetooth basse consommation (BLE, pour information) ==="
-stdbuf -oL -eL bluetoothctl --timeout "$SCAN_DURATION" scan on >/dev/null 2>&1
+{
+    echo "menu scan"
+    echo "transport bredr"
+    echo "back"
+    echo "scan on"
+} >&3
+
+echo "=== Découverte Bluetooth (${SCAN_DURATION}s, transport classique BR/EDR) ==="
+sleep "$SCAN_DURATION"
 
 mapfile -t ALL_LINES < <(bluetoothctl devices | sort -u)
 
@@ -82,6 +90,12 @@ echo "Appareil sélectionné : $MAC ($NAME) [$KIND]"
 if [ "$KIND" = "LE" ]; then
     echo "Attention : interface LE sélectionnée, l'audio A2DP échouera probablement."
 fi
+
+# On arrête le scan seulement maintenant, juste avant le pairing, pour
+# laisser le moins de temps possible à bluetoothd pour purger l'objet
+# éphémère de l'appareil choisi.
+trap - EXIT
+stop_scan
 
 echo
 echo "=== Nettoyage d'un éventuel appairage précédent ==="
