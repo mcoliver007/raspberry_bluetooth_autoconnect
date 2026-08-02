@@ -91,11 +91,11 @@ if [ "$KIND" = "LE" ]; then
     echo "Attention : interface LE sélectionnée, l'audio A2DP échouera probablement."
 fi
 
-# On arrête le scan seulement maintenant, juste avant le pairing, pour
-# laisser le moins de temps possible à bluetoothd pour purger l'objet
-# éphémère de l'appareil choisi.
-trap - EXIT
-stop_scan
+# BlueZ purge un appareil temporaire (découvert mais pas encore appairé) dès
+# que la découverte s'arrête, pas après un délai — le scan doit donc rester
+# actif pendant tout le pairing, pas seulement pendant la sélection. Une
+# fois l'appareil réellement appairé, il n'est plus "temporaire" et le scan
+# peut être arrêté sans risque (géré par le trap EXIT en fin de script).
 
 echo
 echo "=== Nettoyage d'un éventuel appairage précédent ==="
@@ -120,6 +120,11 @@ if ! bluetoothctl info "$MAC" | grep -q "Connected: yes"; then
 fi
 
 echo "Connexion réussie à $MAC."
+
+# L'appareil est maintenant appairé/connecté (plus "temporaire"), le scan
+# peut être arrêté sans risque de le faire purger par bluetoothd.
+trap - EXIT
+stop_scan
 
 SINK="bluez_sink.${MAC//:/_}.a2dp_sink"
 
