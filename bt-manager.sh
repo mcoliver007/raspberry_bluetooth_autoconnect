@@ -6,6 +6,34 @@ LOG_FILE="/var/log/bt-manager.log"
 # pi (déjà lancée à la connexion), au lieu d'en créer une jetable dans /tmp.
 export XDG_RUNTIME_DIR="/run/user/$(id -u pi)"
 
+# Serveur de synthèse vocale Piper TTS (dépôt raspberry_test_synthese_vocale,
+# service systemd --user piper-tts.service). Voir son INSTRUCTIONS_IA.md pour
+# le protocole et les règles d'écriture d'un texte qui se synthétise bien.
+TTS_SOCKET_PATH="${TTS_SOCKET_PATH:-/tmp/piper_tts.sock}"
+
+# speak <fast|read> <texte> : envoie le texte au serveur Piper TTS via son
+# socket Unix. Retourne un code non nul si le serveur n'est pas joignable ou
+# a répondu une erreur, pour permettre un repli côté appelant.
+speak() {
+    local mode="$1" text="$2"
+    python3 - "$TTS_SOCKET_PATH" "$mode" "$text" <<'PYEOF' 2>/dev/null
+import json
+import socket
+import sys
+
+sock_path, mode, text = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.connect(sock_path)
+        s.sendall((json.dumps({"mode": mode, "text": text}) + "\n").encode("utf-8"))
+        resp = s.makefile("r").readline()
+    data = json.loads(resp) if resp else {}
+    sys.exit(0 if data.get("status") == "ok" else 1)
+except OSError:
+    sys.exit(1)
+PYEOF
+}
+
 log() {
     echo "[bt-manager] $1" | tee -a "$LOG_FILE"
     logger -t bt-manager -- "$1"
@@ -115,15 +143,13 @@ while true; do
                     sleep 1
                 done
 
-                # Confirmation vocale sur l'enceinte fraîchement connectée
-                # pico2wave (SVOX Pico) a un rendu bien plus naturel qu'espeak-ng,
-                # qu'on garde en repli si pico2wave n'est pas installé.
-                if command -v pico2wave >/dev/null 2>&1; then
-                    TTS_WAV=$(mktemp --suffix=.wav)
-                    pico2wave -l fr-FR -w "$TTS_WAV" "Connexion à l'enceinte réussie" 2>/dev/null
-                    paplay --device="$SINK" "$TTS_WAV"
-                    rm -f "$TTS_WAV"
+                # Confirmation vocale sur l'enceinte fraîchement connectée, via
+                # le serveur Piper TTS local (mode "fast" : phrase courte).
+                # Repli sur espeak-ng puis un bip si le serveur n'est pas joignable.
+                if speak fast "Connexion à l'enceinte réussie."; then
+                    log "DEBUG: confirmation vocale jouée via Piper TTS"
                 elif command -v espeak-ng >/dev/null 2>&1; then
+                    log "DEBUG: serveur Piper TTS indisponible, repli sur espeak-ng"
                     TTS_WAV=$(mktemp --suffix=.wav)
                     espeak-ng -v fr -w "$TTS_WAV" "Connexion à l'enceinte réussie" 2>/dev/null
                     paplay --device="$SINK" "$TTS_WAV"
