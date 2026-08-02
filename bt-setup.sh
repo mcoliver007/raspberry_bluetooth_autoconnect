@@ -3,6 +3,13 @@
 # découverte -> sélection -> nettoyage -> appairage -> trust -> connexion -> essai sonore.
 set -u
 
+# Fixe la session PulseAudio ciblée par pactl à celle de l'utilisateur pi,
+# plutôt que de dépendre de l'environnement de la session interactive
+# (ex: SSH sans XDG_RUNTIME_DIR défini), qui peut faire spawn une instance
+# PulseAudio jetable et instable au lieu de la vraie session persistante
+# (même problème déjà rencontré et corrigé pour bt-manager.service).
+export XDG_RUNTIME_DIR="/run/user/$(id -u pi)"
+
 SCAN_DURATION=8
 
 need_cmd() {
