@@ -4,6 +4,7 @@
 set -u
 
 SCAN_DURATION=8
+BREDR_SCAN_ATTEMPTS=4
 
 need_cmd() {
     command -v "$1" >/dev/null 2>&1 || { echo "Commande manquante: $1"; exit 1; }
@@ -11,11 +12,44 @@ need_cmd() {
 
 need_cmd bluetoothctl
 need_cmd pactl
+need_cmd hcitool
+need_cmd sudo
 
-echo "=== Découverte des appareils Bluetooth (${SCAN_DURATION}s) ==="
+echo "=== Découverte Bluetooth classique (BR/EDR) ==="
+# hcitool nécessite les capacités CAP_NET_ADMIN/CAP_NET_RAW ; on l'exécute
+# via sudo pour cette seule commande, plutôt que de lancer tout le script en
+# root — ce qui casserait l'accès à la session PulseAudio réelle de l'utilisateur.
+# bluetoothctl "scan on" est peu fiable pour détecter l'interface classique
+# d'une enceinte (certaines n'annoncent leur MAC BR/EDR que pendant une
+# fenêtre courte de leur mode pairing, parfois manquée). hcitool scan fait
+# une inquiry classique directe, plus fiable ici ; on la répète plusieurs
+# fois car la fenêtre d'annonce peut être ratée une fois sur deux.
+declare -A BREDR_NAMES
+for attempt in $(seq 1 "$BREDR_SCAN_ATTEMPTS"); do
+    echo "  tentative $attempt/$BREDR_SCAN_ATTEMPTS…"
+    while IFS=$'\t' read -r MAC NAME; do
+        [ -z "$MAC" ] && continue
+        [ "$NAME" = "n/a" ] && continue
+        BREDR_NAMES["$MAC"]="$NAME"
+    done < <(sudo hcitool scan --flush 2>/dev/null | tail -n +2)
+done
+
+echo
+echo "=== Découverte Bluetooth basse consommation (BLE, pour information) ==="
 stdbuf -oL -eL bluetoothctl --timeout "$SCAN_DURATION" scan on >/dev/null 2>&1
+mapfile -t LE_LINES < <(bluetoothctl devices | sort -u)
 
-mapfile -t DEVICES < <(bluetoothctl devices | sort -u)
+DEVICES=()
+for MAC in "${!BREDR_NAMES[@]}"; do
+    DEVICES+=("$MAC"$'\t'"${BREDR_NAMES[$MAC]}"$'\t'"classique")
+done
+for line in "${LE_LINES[@]}"; do
+    MAC=$(echo "$line" | awk '{print $2}')
+    NAME=$(echo "$line" | cut -d' ' -f3-)
+    # Ne pas dupliquer une MAC déjà trouvée en classique
+    [ -n "${BREDR_NAMES[$MAC]:-}" ] && continue
+    DEVICES+=("$MAC"$'\t'"$NAME"$'\t'"LE")
+done
 
 if [ "${#DEVICES[@]}" -eq 0 ]; then
     echo "Aucun appareil détecté."
@@ -25,10 +59,13 @@ fi
 echo
 echo "Appareils détectés :"
 for i in "${!DEVICES[@]}"; do
-    MAC=$(echo "${DEVICES[$i]}" | awk '{print $2}')
-    NAME=$(echo "${DEVICES[$i]}" | cut -d' ' -f3-)
-    printf "  [%d] %s  (%s)\n" "$i" "$MAC" "$NAME"
+    IFS=$'\t' read -r MAC NAME KIND <<< "${DEVICES[$i]}"
+    printf "  [%d] %s  (%s)  [%s]\n" "$i" "$MAC" "$NAME" "$KIND"
 done
+echo
+echo "Note : seule l'interface [classique] permet l'audio A2DP. L'interface"
+echo "[LE] est affichée à titre informatif (souvent un canal de contrôle"
+echo "d'appli compagnon), la sélectionner échouera pour un usage audio."
 
 echo
 read -rp "Sélectionne le numéro de l'appareil à configurer : " CHOICE
@@ -38,9 +75,12 @@ if ! [[ "$CHOICE" =~ ^[0-9]+$ ]] || [ "$CHOICE" -ge "${#DEVICES[@]}" ]; then
     exit 1
 fi
 
-MAC=$(echo "${DEVICES[$CHOICE]}" | awk '{print $2}')
-NAME=$(echo "${DEVICES[$CHOICE]}" | cut -d' ' -f3-)
-echo "Appareil sélectionné : $MAC ($NAME)"
+IFS=$'\t' read -r MAC NAME KIND <<< "${DEVICES[$CHOICE]}"
+echo "Appareil sélectionné : $MAC ($NAME) [$KIND]"
+
+if [ "$KIND" = "LE" ]; then
+    echo "Attention : interface LE sélectionnée, l'audio A2DP échouera probablement."
+fi
 
 echo
 echo "=== Nettoyage d'un éventuel appairage précédent ==="

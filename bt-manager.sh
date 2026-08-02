@@ -150,55 +150,62 @@ while true; do
         # Retirer tout commentaire inline (# et ce qui suit), puis les espaces de bord
         MAC=$(echo "$RAW_LINE" | sed 's/#.*//' | xargs)
         [[ "$MAC" =~ ^#.*$ || -z "$MAC" ]] && continue
-        log "DEBUG: test de la MAC préférée : $MAC"
+
+        # Le scan bluetoothctl (LE par défaut sur ce système) ne détecte pas
+        # toujours l'interface BR/EDR classique d'une enceinte déjà appairée
+        # — hors LE, l'absence dans $DEVICES n'est donc pas fiable pour
+        # décider de tenter ou non la connexion. Une connexion Bluetooth
+        # classique se fait par page scan et ne nécessite pas d'avoir été
+        # détectée par un inquiry scan au préalable : on tente toujours la
+        # connexion directement, scan ou pas.
         if echo "$DEVICES" | grep -qi "$MAC"; then
-            log "Enceinte préférée détectée : $MAC"
-            bluetoothctl connect $MAC
-            sleep 3
-            if bluetoothctl info $MAC | grep -q "Connected: yes"; then
-                log "Connexion réussie : $MAC"
-                CARD="bluez_card.${MAC//:/_}"
-                SINK="bluez_sink.${MAC//:/_}.a2dp_sink"
-
-                # La carte Bluetooth met quelques secondes à s'enregistrer
-                # dans PulseAudio après la connexion.
-                wait_for_pactl_object cards "$CARD" || log "DEBUG: carte $CARD absente après 5s"
-                retry_pactl pactl set-card-profile "$CARD" a2dp-sink || log "DEBUG: échec set-card-profile pour $CARD"
-
-                # Le sink A2DP, lui, n'apparaît qu'après le changement de
-                # profil de la carte ci-dessus.
-                wait_for_pactl_object sinks "$SINK" || log "DEBUG: sink $SINK absent après 5s"
-                retry_pactl pactl set-default-sink "$SINK" || log "DEBUG: échec set-default-sink pour $SINK"
-
-                log "Profil A2DP activé pour $MAC"
-                CONNECT_FAILS[$MAC]=0
-
-                # Confirmation vocale sur l'enceinte fraîchement connectée, via
-                # le serveur Piper TTS local (mode "fast" : phrase courte).
-                # Repli sur espeak-ng puis un bip si le serveur n'est pas joignable.
-                if speak fast "Connexion à l'enceinte réussie."; then
-                    log "DEBUG: confirmation vocale jouée via Piper TTS"
-                elif command -v espeak-ng >/dev/null 2>&1; then
-                    log "DEBUG: serveur Piper TTS indisponible, repli sur espeak-ng"
-                    TTS_WAV=$(mktemp --suffix=.wav)
-                    espeak-ng -v fr -w "$TTS_WAV" "Connexion à l'enceinte réussie" 2>/dev/null
-                    paplay --device="$SINK" "$TTS_WAV"
-                    rm -f "$TTS_WAV"
-                elif [ -f /usr/share/sounds/alsa/Front_Center.wav ]; then
-                    paplay --device="$SINK" /usr/share/sounds/alsa/Front_Center.wav
-                fi
-
-                CONNECTED=true
-                break
-            else
-                log "Échec de connexion à $MAC"
-                CONNECT_FAILS[$MAC]=$(( ${CONNECT_FAILS[$MAC]:-0} + 1 ))
-                if [ "${CONNECT_FAILS[$MAC]}" -ge "$CONNECT_FAIL_HINT_THRESHOLD" ]; then
-                    log "PISTE : $MAC est détectée au scan mais refuse la connexion depuis ${CONNECT_FAILS[$MAC]} tentatives consécutives — vérifier si l'enceinte a déjà atteint sa limite d'appareils connectés simultanément (multipoint, souvent 2 max sur ce type d'enceinte). Déconnecter un appareil déjà connecté à l'enceinte puis réessayer."
-                fi
-            fi
+            log "Enceinte préférée détectée au scan : $MAC"
         else
-            log "DEBUG: MAC préférée $MAC non trouvée dans le scan"
+            log "DEBUG: MAC préférée $MAC non détectée au scan — tentative de connexion directe quand même"
+        fi
+        bluetoothctl connect $MAC
+        sleep 3
+        if bluetoothctl info $MAC | grep -q "Connected: yes"; then
+            log "Connexion réussie : $MAC"
+            CARD="bluez_card.${MAC//:/_}"
+            SINK="bluez_sink.${MAC//:/_}.a2dp_sink"
+
+            # La carte Bluetooth met quelques secondes à s'enregistrer
+            # dans PulseAudio après la connexion.
+            wait_for_pactl_object cards "$CARD" || log "DEBUG: carte $CARD absente après 5s"
+            retry_pactl pactl set-card-profile "$CARD" a2dp-sink || log "DEBUG: échec set-card-profile pour $CARD"
+
+            # Le sink A2DP, lui, n'apparaît qu'après le changement de
+            # profil de la carte ci-dessus.
+            wait_for_pactl_object sinks "$SINK" || log "DEBUG: sink $SINK absent après 5s"
+            retry_pactl pactl set-default-sink "$SINK" || log "DEBUG: échec set-default-sink pour $SINK"
+
+            log "Profil A2DP activé pour $MAC"
+            CONNECT_FAILS[$MAC]=0
+
+            # Confirmation vocale sur l'enceinte fraîchement connectée, via
+            # le serveur Piper TTS local (mode "fast" : phrase courte).
+            # Repli sur espeak-ng puis un bip si le serveur n'est pas joignable.
+            if speak fast "Connexion à l'enceinte réussie."; then
+                log "DEBUG: confirmation vocale jouée via Piper TTS"
+            elif command -v espeak-ng >/dev/null 2>&1; then
+                log "DEBUG: serveur Piper TTS indisponible, repli sur espeak-ng"
+                TTS_WAV=$(mktemp --suffix=.wav)
+                espeak-ng -v fr -w "$TTS_WAV" "Connexion à l'enceinte réussie" 2>/dev/null
+                paplay --device="$SINK" "$TTS_WAV"
+                rm -f "$TTS_WAV"
+            elif [ -f /usr/share/sounds/alsa/Front_Center.wav ]; then
+                paplay --device="$SINK" /usr/share/sounds/alsa/Front_Center.wav
+            fi
+
+            CONNECTED=true
+            break
+        else
+            log "Échec de connexion à $MAC"
+            CONNECT_FAILS[$MAC]=$(( ${CONNECT_FAILS[$MAC]:-0} + 1 ))
+            if [ "${CONNECT_FAILS[$MAC]}" -ge "$CONNECT_FAIL_HINT_THRESHOLD" ]; then
+                log "PISTE : $MAC refuse la connexion depuis ${CONNECT_FAILS[$MAC]} tentatives consécutives — vérifier si l'enceinte a déjà atteint sa limite d'appareils connectés simultanément (multipoint, souvent 2 max sur ce type d'enceinte). Déconnecter un appareil déjà connecté à l'enceinte puis réessayer."
+            fi
         fi
     done < "$PREF_FILE"
 
