@@ -52,6 +52,19 @@ wait_for_pactl_object() {
     return 1
 }
 
+# retry_pactl <commande pactl...> : la présence d'une carte/d'un sink dans
+# `pactl list` ne garantit pas que le transport audio interne (utilisé par
+# set-card-profile/set-default-sink) est déjà prêt juste après une connexion
+# Bluetooth. On réessaie donc la commande elle-même jusqu'à 5 fois plutôt que
+# de se fier uniquement à wait_for_pactl_object.
+retry_pactl() {
+    for attempt in 1 2 3 4 5; do
+        "$@" 2>/dev/null && return 0
+        sleep 1
+    done
+    return 1
+}
+
 trap 'log "Arrêt demandé par systemd — bt-manager se termine proprement."; exit 0' TERM
 
 log "bt-manager démarré."
@@ -143,12 +156,12 @@ while true; do
                 # La carte Bluetooth met quelques secondes à s'enregistrer
                 # dans PulseAudio après la connexion.
                 wait_for_pactl_object cards "$CARD" || log "DEBUG: carte $CARD absente après 5s"
-                pactl set-card-profile "$CARD" a2dp-sink
+                retry_pactl pactl set-card-profile "$CARD" a2dp-sink || log "DEBUG: échec set-card-profile pour $CARD"
 
                 # Le sink A2DP, lui, n'apparaît qu'après le changement de
                 # profil de la carte ci-dessus.
                 wait_for_pactl_object sinks "$SINK" || log "DEBUG: sink $SINK absent après 5s"
-                pactl set-default-sink "$SINK"
+                retry_pactl pactl set-default-sink "$SINK" || log "DEBUG: échec set-default-sink pour $SINK"
 
                 log "Profil A2DP activé pour $MAC"
 
