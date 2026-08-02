@@ -99,7 +99,15 @@ fi
 
 echo
 echo "=== Nettoyage d'un éventuel appairage précédent ==="
-bluetoothctl remove "$MAC" >/dev/null 2>&1
+# bluetoothctl remove supprime l'objet device quel qu'il soit, appairé ou
+# non — l'appeler sans condition supprimerait l'objet fraîchement découvert
+# qu'on vient de trouver (juste avant de tenter de le pairer !). On ne
+# nettoie donc que s'il existe vraiment un appairage précédent à effacer.
+if bluetoothctl info "$MAC" 2>/dev/null | grep -q "Paired: yes"; then
+    bluetoothctl remove "$MAC" >/dev/null 2>&1
+else
+    echo "Aucun appairage précédent à nettoyer."
+fi
 
 echo
 echo "=== Appairage ==="
