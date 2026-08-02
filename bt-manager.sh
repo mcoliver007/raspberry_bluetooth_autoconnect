@@ -204,8 +204,28 @@ while true; do
 
     if [ "$CONNECTED" = true ]; then
         log "Surveillance de la connexion à $MAC"
-        while bluetoothctl info $MAC | grep -q "Connected: yes"; do
-            sleep 5
+        # Un pic de charge CPU (ex: démarrage de Kodi sur un Pi 3B) peut
+        # ralentir D-Bus/bluetoothd le temps d'un cycle et faire échouer ce
+        # check ponctuellement sans que l'enceinte soit réellement
+        # déconnectée. On exige plusieurs échecs consécutifs avant de
+        # déclarer la perte, pour éviter de relancer un scan Bluetooth actif
+        # (perturbateur pour une connexion A2DP en cours sur ce chipset)
+        # à cause d'un simple hoquet transitoire.
+        CONSECUTIVE_FAILURES=0
+        MAX_CONSECUTIVE_FAILURES=3
+        while true; do
+            if bluetoothctl info $MAC | grep -q "Connected: yes"; then
+                CONSECUTIVE_FAILURES=0
+                sleep 5
+                continue
+            fi
+
+            CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES + 1))
+            log "DEBUG: vérification de connexion en échec pour $MAC (${CONSECUTIVE_FAILURES}/${MAX_CONSECUTIVE_FAILURES})"
+            if [ "$CONSECUTIVE_FAILURES" -ge "$MAX_CONSECUTIVE_FAILURES" ]; then
+                break
+            fi
+            sleep 2
         done
         log "Enceinte perdue : $MAC — tentative de reconnexion dans 10s"
         sleep 10
