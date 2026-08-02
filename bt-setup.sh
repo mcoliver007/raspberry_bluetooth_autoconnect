@@ -13,6 +13,26 @@ need_cmd bluetoothctl
 need_cmd pactl
 need_cmd mkfifo
 
+# wait_for_pactl_object / retry_pactl : la présence d'une carte/d'un sink
+# dans `pactl list` ne garantit pas que son transport audio interne est déjà
+# prêt juste après une connexion Bluetooth (même logique que bt-manager.sh).
+wait_for_pactl_object() {
+    local kind="$1" name="$2"
+    for attempt in 1 2 3 4 5; do
+        pactl list "$kind" short | grep -q "$name" && return 0
+        sleep 1
+    done
+    return 1
+}
+
+retry_pactl() {
+    for attempt in 1 2 3 4 5; do
+        "$@" 2>/dev/null && return 0
+        sleep 1
+    done
+    return 1
+}
+
 # BlueZ ne garde en mémoire un appareil découvert (mais pas encore appairé)
 # que temporairement : peu après l'arrêt du scan, l'objet est purgé et
 # bluetoothctl pair/trust/connect répondent "not available". On garde donc
@@ -119,10 +139,22 @@ bluetoothctl trust "$MAC"
 
 echo
 echo "=== Connexion ==="
-bluetoothctl connect "$MAC"
-sleep 3
+# La connexion immédiatement après le pairing peut échouer une fois
+# (org.bluez.Error.Failed) le temps que la résolution des services SDP
+# se termine vraiment côté BlueZ — on réessaie donc plutôt que d'échouer
+# sur le premier essai.
+CONNECTED=false
+for attempt in 1 2 3; do
+    bluetoothctl connect "$MAC"
+    sleep 3
+    if bluetoothctl info "$MAC" | grep -q "Connected: yes"; then
+        CONNECTED=true
+        break
+    fi
+    echo "Nouvelle tentative de connexion ($attempt/3)…"
+done
 
-if ! bluetoothctl info "$MAC" | grep -q "Connected: yes"; then
+if [ "$CONNECTED" != true ]; then
     echo "Échec de connexion à $MAC."
     exit 1
 fi
@@ -138,9 +170,13 @@ SINK="bluez_sink.${MAC//:/_}.a2dp_sink"
 
 echo
 echo "=== Sélection du profil A2DP et du sink audio ==="
-pactl set-card-profile "bluez_card.${MAC//:/_}" a2dp-sink 2>/dev/null
-sleep 1
-pactl set-default-sink "$SINK" 2>/dev/null
+CARD="bluez_card.${MAC//:/_}"
+
+wait_for_pactl_object cards "$CARD" || echo "Carte $CARD absente après 5s d'attente."
+retry_pactl pactl set-card-profile "$CARD" a2dp-sink || echo "Échec de set-card-profile pour $CARD."
+
+wait_for_pactl_object sinks "$SINK" || echo "Sink $SINK absent après 5s d'attente."
+retry_pactl pactl set-default-sink "$SINK" || echo "Échec de set-default-sink pour $SINK."
 
 if ! pactl list sinks short | grep -q "$SINK"; then
     echo "Le sink audio '$SINK' n'apparaît pas dans PulseAudio."
