@@ -15,7 +15,7 @@ need_cmd pactl
 echo "=== Découverte des appareils Bluetooth (${SCAN_DURATION}s) ==="
 stdbuf -oL -eL bluetoothctl --timeout "$SCAN_DURATION" scan on >/dev/null 2>&1
 
-mapfile -t DEVICES < <(bluetoothctl devices | grep -v ' LE-' | sort -u)
+mapfile -t DEVICES < <(bluetoothctl devices | sort -u)
 
 if [ "${#DEVICES[@]}" -eq 0 ]; then
     echo "Aucun appareil détecté."
