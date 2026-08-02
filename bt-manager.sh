@@ -180,6 +180,17 @@ while true; do
             wait_for_pactl_object sinks "$SINK" || log "DEBUG: sink $SINK absent après 5s"
             retry_pactl pactl set-default-sink "$SINK" || log "DEBUG: échec set-default-sink pour $SINK"
 
+            # Changer le sink par défaut ne redirige pas les flux audio déjà
+            # ouverts (ex: le process aplay persistant du serveur Piper TTS,
+            # lancé une seule fois au démarrage de piper-tts.service contre
+            # l'ancien sink par défaut) — PulseAudio ne les migre pas tout
+            # seul vers un nouveau sink par défaut. On les déplace donc
+            # explicitement, sans quoi la confirmation vocale se joue sans
+            # erreur mais sur l'ancienne sortie audio, pas sur l'enceinte.
+            pactl list short sink-inputs | while read -r INPUT_ID _; do
+                pactl move-sink-input "$INPUT_ID" "$SINK" 2>/dev/null
+            done
+
             log "Profil A2DP activé pour $MAC"
             CONNECT_FAILS[$MAC]=0
 
