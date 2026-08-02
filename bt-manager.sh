@@ -67,6 +67,13 @@ retry_pactl() {
 
 trap 'log "Arrêt demandé par systemd — bt-manager se termine proprement."; exit 0' TERM
 
+# Compteur d'échecs de connexion consécutifs par MAC, pour repérer le cas
+# "l'enceinte est bien détectée au scan mais refuse la connexion à
+# répétition" — signature typique d'une enceinte multipoint (ex: Bose Flex
+# SoundLink, limitée à 2 appareils connectés simultanément) déjà pleine.
+declare -A CONNECT_FAILS
+CONNECT_FAIL_HINT_THRESHOLD=3
+
 log "bt-manager démarré."
 log "DEBUG: PATH=$PATH"
 log "DEBUG: test bluetoothctl=$(which bluetoothctl)"
@@ -164,6 +171,7 @@ while true; do
                 retry_pactl pactl set-default-sink "$SINK" || log "DEBUG: échec set-default-sink pour $SINK"
 
                 log "Profil A2DP activé pour $MAC"
+                CONNECT_FAILS[$MAC]=0
 
                 # Confirmation vocale sur l'enceinte fraîchement connectée, via
                 # le serveur Piper TTS local (mode "fast" : phrase courte).
@@ -184,6 +192,10 @@ while true; do
                 break
             else
                 log "Échec de connexion à $MAC"
+                CONNECT_FAILS[$MAC]=$(( ${CONNECT_FAILS[$MAC]:-0} + 1 ))
+                if [ "${CONNECT_FAILS[$MAC]}" -ge "$CONNECT_FAIL_HINT_THRESHOLD" ]; then
+                    log "PISTE : $MAC est détectée au scan mais refuse la connexion depuis ${CONNECT_FAILS[$MAC]} tentatives consécutives — vérifier si l'enceinte a déjà atteint sa limite d'appareils connectés simultanément (multipoint, souvent 2 max sur ce type d'enceinte). Déconnecter un appareil déjà connecté à l'enceinte puis réessayer."
+                fi
             fi
         else
             log "DEBUG: MAC préférée $MAC non trouvée dans le scan"
