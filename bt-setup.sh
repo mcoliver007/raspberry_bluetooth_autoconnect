@@ -20,6 +20,16 @@ need_cmd bluetoothctl
 need_cmd pactl
 need_cmd mkfifo
 
+# Sans instance PulseAudio persistante déjà lancée (ex: bt-manager.service
+# arrêté pour ce test manuel), les appels pactl ci-dessous déclenchent
+# l'auto-spawn par défaut de PulseAudio : une instance jetable qui s'éteint
+# dès qu'elle devient inactive, désenregistrant au passage son endpoint
+# A2DP en plein milieu de la négociation. On démarre donc explicitement une
+# instance persistante, comme le fait bt-manager.sh (no-op si déjà lancée).
+pulseaudio --start
+sleep 2
+pactl list modules short | grep -q module-bluetooth-discover || pactl load-module module-bluetooth-discover
+
 # wait_for_pactl_object / retry_pactl : la présence d'une carte/d'un sink
 # dans `pactl list` ne garantit pas que son transport audio interne est déjà
 # prêt juste après une connexion Bluetooth (même logique que bt-manager.sh).
