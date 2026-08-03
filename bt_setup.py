@@ -96,8 +96,10 @@ def start_pulseaudio() -> None:
     # par défaut de PulseAudio : une instance jetable qui s'éteint dès qu'elle
     # devient inactive, désenregistrant son endpoint A2DP en plein milieu de
     # la négociation. On démarre donc explicitement une instance persistante
-    # (no-op si déjà lancée).
-    subprocess.run(["pulseaudio", "--start"], capture_output=True)
+    # (no-op si déjà lancée) — et avec --exit-idle-time=-1, car même cette
+    # instance persistante s'éteindrait sinon d'elle-même après 20s (défaut)
+    # sans aucun client connecté.
+    subprocess.run(["pulseaudio", "--start", "--exit-idle-time=-1"], capture_output=True)
     time.sleep(2)
     info_result = run(["pactl", "info"])
     if info_result.returncode != 0:

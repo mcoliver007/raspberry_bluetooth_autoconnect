@@ -107,7 +107,15 @@ def read_preferred_macs() -> list[str]:
 
 
 def start_pulseaudio() -> None:
-    subprocess.run(["pulseaudio", "--start"], capture_output=True)
+    # --exit-idle-time=-1 : même cette instance persistante s'éteindrait
+    # sinon d'elle-même après 20s (défaut PulseAudio) sans aucun client
+    # connecté — exactement le trou dans lequel tombent nos propres appels
+    # pactl (courts, déconnexion immédiate) suivis d'un délai de plusieurs
+    # secondes avant que Kodi ne s'y connecte à son tour. PulseAudio
+    # s'éteignant puis étant relancé par l'autospawn de Kodi, l'endpoint
+    # A2DP est réenregistré à froid auprès de BlueZ, ce qui peut perturber
+    # la connexion Bluetooth déjà établie (voir incident démarrage Kodi).
+    subprocess.run(["pulseaudio", "--start", "--exit-idle-time=-1"], capture_output=True)
     time.sleep(2)
     modules = subprocess.run(["pactl", "list", "modules", "short"], capture_output=True, text=True)
     if "module-bluetooth-discover" not in modules.stdout:
