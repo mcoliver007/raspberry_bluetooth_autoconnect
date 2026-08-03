@@ -106,6 +106,31 @@ def read_preferred_macs() -> list[str]:
     return macs
 
 
+PULSEAUDIO_HEALTH_TIMEOUT = 3  # secondes avant de considérer PulseAudio bloqué
+
+
+def pulseaudio_healthy() -> bool:
+    """Un process pulseaudio peut rester en mémoire (pgrep le voit toujours)
+    tout en ne répondant plus aux connexions clients — observé après des
+    déconnexions brutales répétées d'un client audio (ex: Kodi qui segfault
+    en boucle). pactl info avec un timeout court permet de détecter ce cas,
+    distinct d'un process simplement absent."""
+    try:
+        result = subprocess.run(
+            ["pactl", "info"], capture_output=True, timeout=PULSEAUDIO_HEALTH_TIMEOUT
+        )
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def restart_pulseaudio() -> None:
+    log("PulseAudio ne répond plus — redémarrage forcé.")
+    subprocess.run(["pkill", "-9", "-x", "pulseaudio"], capture_output=True)
+    time.sleep(1)
+    start_pulseaudio()
+
+
 def start_pulseaudio() -> None:
     # --exit-idle-time=-1 : même cette instance persistante s'éteindrait
     # sinon d'elle-même après 20s (défaut PulseAudio) sans aucun client
@@ -228,6 +253,10 @@ def main() -> None:
             # échecs consécutifs avant de déclarer la perte.
             consecutive_failures = 0
             while _running:
+                if not pulseaudio_healthy():
+                    restart_pulseaudio()
+                    activate_a2dp(connected_mac)
+                    continue
                 if bt.is_connected(connected_mac):
                     consecutive_failures = 0
                     time.sleep(5)
