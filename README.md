@@ -1,28 +1,50 @@
 # raspberry_bluetooth_autoconnect
 
-Reconnexion automatique à une enceinte Bluetooth préférée sur Raspberry Pi
-(connexion A2DP, confirmation vocale), dès le boot et à chaque perte de
-connexion.
+Reconnexion automatique à une enceinte Bluetooth préférée sur un Raspberry
+Pi : connexion A2DP dès le boot, reconnexion automatique à chaque perte de
+signal, et confirmation vocale locale (offline) quand la connexion réussit.
 
-**Branche `claude/python-dbus-rewrite`** : réécriture expérimentale en
-Python, parlant directement à `bluetoothd` via D-Bus au lieu de scripter
-`bluetoothctl` en bash. `bluetoothctl` est un outil interactif pensé pour un
-humain, pas pour être piloté par script (parsing de texte asynchrone, agent
-SSP implicite non contrôlable) — voir `bluez_dbus.py` pour le détail du
-raisonnement. Cette branche n'a pas encore été validée sur le matériel réel
-(contrairement à `main`) ; ne pas merger avant test complet sur un Pi.
+Le projet parle directement à `bluetoothd` via D-Bus (voir `bluez_dbus.py`)
+plutôt que de scripter `bluetoothctl` : les appels de méthode (pairing,
+connexion) renvoient de vraies erreurs exploitables au lieu d'un texte à
+parser, et un seul agent d'appairage est utilisé, explicitement, pour tout
+le flux.
 
-Nouvelle dépendance : `sudo apt install python3-dbus python3-gi`
+## Ce que ça fait
+
+- Se connecte automatiquement à la première enceinte disponible dans une
+  liste de préférences (par ordre de priorité), au démarrage du Pi et après
+  toute perte de connexion.
+- Active le bon profil audio A2DP côté PulseAudio et le sink correspondant.
+- Joue une confirmation vocale ("Connexion à l'enceinte réussie.") une fois
+  connecté, via un serveur de synthèse vocale local (Piper TTS) si présent,
+  avec repli automatique sur `espeak-ng` puis sur un simple bip.
+- Fournit un assistant interactif (`bt_setup.py`) pour appairer une nouvelle
+  enceinte, avec des diagnostics système explicites (rfkill, bluetoothd,
+  bug ERTM connu du Pi, état PulseAudio) et un essai sonore de validation.
 
 ## Fichiers du dépôt
 
 | Fichier | Rôle |
 |---|---|
-| `bluez_dbus.py` | Module partagé : contrôleur BlueZ via D-Bus (découverte, pairing, trust, connexion), agent SSP unique auto-acceptant. |
-| `bt_manager.py` | Boucle principale : connexion directe à la première enceinte préférée trouvée (sans scan préalable), activation du profil audio A2DP, confirmation vocale, puis surveillance jusqu'à la perte de connexion. Tourne en continu comme service systemd. |
+| `bluez_dbus.py` | Module partagé : contrôleur BlueZ via D-Bus (découverte, pairing, trust, connexion), agent d'appairage unique auto-acceptant. |
+| `bt_manager.py` | Boucle principale : connexion directe à la première enceinte préférée trouvée, activation du profil audio A2DP, confirmation vocale, puis surveillance jusqu'à la perte de connexion. Tourne en continu comme service systemd. |
 | `bt-manager.service` | Unité systemd qui lance `bt_manager.py` au boot et le relance automatiquement (`Restart=always`). |
 | `bt_setup.py` | Assistant interactif à lancer manuellement : diagnostics système, découverte, appairage (seulement si nécessaire), connexion, profil audio A2DP, essai sonore. À utiliser pour ajouter/déboguer une enceinte, pas pour l'usage courant. |
 | `~/.config/bt-preferred.conf` (hors dépôt) | Liste des adresses MAC préférées, une par ligne, par ordre de priorité. Commentaires `#` et texte après `#` sur une ligne ignorés. |
+
+Pour le récit complet des problèmes rencontrés et de la façon dont le
+projet en est arrivé là, voir [`HISTORY.md`](HISTORY.md).
+
+## Prérequis
+
+- Un Raspberry Pi (testé sur Raspberry Pi OS / Raspbian Bullseye) avec
+  Bluetooth intégré ou adaptateur USB.
+- `bluez`, `pulseaudio` (+ `pulseaudio-module-bluetooth`), `python3-dbus`,
+  `python3-gi`.
+- Optionnel : un serveur [Piper TTS local](https://github.com/mcoliver007/raspberry_test_synthese_vocale)
+  pour une confirmation vocale de meilleure qualité, ou `espeak-ng` pour un
+  repli plus simple.
 
 ## Installation
 
@@ -38,30 +60,31 @@ cat > /home/pi/.config/bt-preferred.conf <<'EOF'
 AA:BB:CC:DD:EE:FF   # Nom de l'enceinte
 EOF
 
-# Appairer l'enceinte une première fois
+# Appairer l'enceinte une première fois (mets-la en mode pairing avant de lancer)
 ./bt_setup.py
 
-# Installer le service
+# Installer le service de reconnexion automatique
 sudo cp bt-manager.service /etc/systemd/system/bt-manager.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now bt-manager
 ```
 
-### Dépendance optionnelle : confirmation vocale
+### Confirmation vocale (optionnel)
 
 La confirmation vocale à la connexion utilise en priorité le serveur
 [Piper TTS local](https://github.com/mcoliver007/raspberry_test_synthese_vocale)
 (service `systemd --user piper-tts.service`, 100% offline, voix naturelle).
 S'il n'est pas installé/démarré, `bt_manager.py` retombe automatiquement sur
-`espeak-ng` (voix plus robotique mais sans dépendance), puis sur un simple bip
-si `espeak-ng` n'est pas non plus disponible. Aucune des deux n'est requise
-pour que la reconnexion Bluetooth fonctionne.
+`espeak-ng` (voix plus robotique mais sans dépendance), puis sur un simple
+bip si `espeak-ng` n'est pas non plus disponible. Aucune des deux n'est
+requise pour que la reconnexion Bluetooth fonctionne.
 
 ## Utilisation au quotidien
 
-Le service tourne seul, sans intervention. Pour ajouter une nouvelle enceinte
-ou une nouvelle MAC de secours, l'ajouter dans `bt-preferred.conf` (l'ordre
-des lignes = ordre de priorité), puis relancer `bt_setup.py` pour l'appairer.
+Le service tourne seul, sans intervention. Pour ajouter une nouvelle
+enceinte ou une nouvelle MAC de secours, l'ajouter dans `bt-preferred.conf`
+(l'ordre des lignes = ordre de priorité), puis relancer `bt_setup.py` pour
+l'appairer.
 
 Logs en direct :
 ```bash
@@ -100,7 +123,13 @@ journalctl -u bt-manager -f
    contrôle. Utiliser la MAC de l'interface **classique** (sans `LE-`) dans
    `bt-preferred.conf` — l'interface `LE-` ne permet pas l'A2DP.
 
-### La connexion Bluetooth réussit puis échoue aussitôt (`Failed to connect: org.bluez.Error.Failed`)
+5. **L'enceinte a-t-elle atteint sa limite d'appareils connectés
+   simultanément ?** Beaucoup d'enceintes (multipoint) n'acceptent que 2
+   connexions actives à la fois. Si `bt-manager` échoue à répétition sur
+   une enceinte pourtant détectée, déconnecte un autre appareil qui lui est
+   déjà connecté et réessaie.
+
+### La connexion Bluetooth réussit puis échoue aussitôt
 
 Regarder `journalctl -u bluetooth` au moment de l'échec :
 
@@ -111,9 +140,10 @@ Regarder `journalctl -u bluetooth` au moment de l'échec :
   echo "options bluetooth disable_ertm=Y" | sudo tee /etc/modprobe.d/bluetooth.conf
   sudo reboot
   ```
-- **État bloqué après une mise en veille de l'enceinte** (`Host is down`
-  en boucle) : relancer `./bt_setup.py`, qui bascule automatiquement sur un
-  `remove` + ré-appairage si la connexion échoue malgré un appairage existant.
+  `bt_setup.py` vérifie ce réglage automatiquement au démarrage.
+- **État bloqué après une mise en veille de l'enceinte** : relancer
+  `./bt_setup.py`, qui bascule automatiquement sur un `remove` +
+  ré-appairage si la connexion échoue malgré un appairage existant.
 
 ### Aucun son ne sort de l'enceinte (Bluetooth connecté, mais muet)
 
@@ -123,7 +153,7 @@ Regarder `journalctl -u bluetooth` au moment de l'échec :
    ```
    Le `Server String` doit être `/run/user/<uid>/pulse/native`, pas un
    chemin `/tmp/pulse-XXXX` (instance jetable et cassée, symptôme d'un
-   `XDG_RUNTIME_DIR` mal résolu — voir Historique, point 4).
+   `XDG_RUNTIME_DIR` mal résolu — voir `HISTORY.md`).
 
 2. **Le sink Bluetooth existe et est actif ?**
    ```bash
@@ -142,62 +172,3 @@ Regarder `journalctl -u bluetooth` au moment de l'échec :
    Vérifier le serveur Piper : `systemctl --user status piper-tts.service`
    et `journalctl --user -u piper-tts.service`. En son absence, le script
    retombe sur `espeak-ng` silencieusement si celui-ci est absent aussi.
-
-## Historique du développement — enseignements clés
-
-Résumé des blocages majeurs rencontrés et de leur résolution (le détail
-complet est dans l'historique des commits/PR) :
-
-1. **Le fichier de préférences autorise des commentaires inline**
-   (`MAC # nom`), mais la lecture ligne à ligne du script ne les retirait
-   pas → la MAC entière incluant le commentaire ne matchait jamais le
-   scan. Correction : normaliser chaque ligne (`sed 's/#.*//' | xargs`)
-   avant comparaison.
-
-2. **Le service tournait en `User=root`**, qui démarrait sa propre
-   instance PulseAudio isolée, distincte de la vraie session audio de
-   l'utilisateur `pi` (celle réellement connectée au matériel/à
-   l'enceinte). Bascule du service en `User=pi`, avec les capacités
-   `CAP_NET_ADMIN`/`CAP_NET_RAW` nécessaires à `hciconfig` accordées via
-   `AmbientCapabilities` plutôt que par un utilisateur root complet.
-
-3. **`XDG_RUNTIME_DIR` mal résolu même après le passage en `User=pi`** :
-   le spécificateur systemd `%U` (qu'on pensait résoudre l'UID de
-   `User=`) se résout en réalité à l'UID du **gestionnaire systemd**
-   (root, pour un service système), pas à celui configuré par `User=`.
-   Leçon : `%U`/`%u` ne sont fiables que pour des instances
-   `systemd --user`. Correction : résolution explicite de l'UID par nom
-   d'utilisateur (`id -u pi`) directement dans le script.
-
-4. **Connexion A2DP échouant systématiquement avec
-   `avdtp_connect_cb() ... Invalid exchange (52)`** : bug connu du
-   contrôleur Bluetooth Broadcom embarqué du Pi avec le mode ERTM
-   (Enhanced Retransmission Mode) du L2CAP, incompatible avec certaines
-   enceintes. Correction au niveau noyau (`disable_ertm=Y`), hors du
-   contrôle du script applicatif — rappel que certains échecs Bluetooth
-   ne se résolvent pas en userspace.
-
-5. **Course entre la connexion Bluetooth et l'enregistrement de la
-   carte/du sink côté PulseAudio** (`Failure: No such entity` sur
-   `set-card-profile`/`set-default-sink`) : la présence d'un objet dans
-   `pactl list` ne garantit pas que son transport audio interne est
-   réellement prêt. Une simple attente/vérification de présence ne
-   suffisait pas ; la solution robuste a été de réessayer la commande
-   `pactl` elle-même (`retry_pactl`) plutôt que de se fier à un
-   contrôle préalable dans une liste.
-
-6. **Recherche de la meilleure qualité de synthèse vocale offline** :
-   `espeak-ng` seul (voix très robotique) → tentative `pico2wave` puis
-   voix MBROLA (indisponibles sur ce Raspberry Pi OS/architecture) →
-   `gTTS` (bonne qualité, mais dépendance réseau et API non-officielle de
-   Google Traduction, cassée une première fois par un changement côté
-   Google avant même la mise en prod) → adoption finale d'un **serveur
-   Piper TTS local dédié** (projet séparé, voix neuronale, 100% offline).
-   Leçon : pour un usage embarqué fiable sur le long terme, préférer un
-   moteur local à une dépendance à un service tiers non garanti dans le
-   temps.
-
-7. **Enceintes à double identité Bluetooth (BLE + BR/EDR)** : Bose (et
-   d'autres) diffusent une interface `LE-*` (app de contrôle) en plus de
-   l'interface classique utilisée pour l'audio A2DP — source de confusion
-   lors de l'appairage manuel si la mauvaise MAC est sélectionnée.
