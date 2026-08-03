@@ -123,7 +123,7 @@ def activate_a2dp(mac: str) -> None:
     # PulseAudio après la connexion.
     if not wait_for_pactl_object("cards", card):
         log(f"DEBUG: carte {card} absente après 5s")
-    success, error = retry_pactl(["pactl", "set-card-profile", card, "a2dp-sink"])
+    success, error = retry_pactl(["pactl", "set-card-profile", card, "a2dp_sink"])
     if not success:
         detail = error or "(pas de message d'erreur)"
         log(f"DEBUG: échec set-card-profile pour {card} : {detail}")

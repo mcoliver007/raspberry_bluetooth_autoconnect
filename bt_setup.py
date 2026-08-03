@@ -174,9 +174,9 @@ def setup_audio(mac: str, name: str) -> None:
     print("=== Sélection du profil A2DP et du sink audio ===")
     if not wait_for_pactl_object("cards", card):
         warn(f"Carte {card} absente après 5s d'attente.")
-    success, error = retry_pactl(["pactl", "set-card-profile", card, "a2dp-sink"])
+    success, error = retry_pactl(["pactl", "set-card-profile", card, "a2dp_sink"])
     if success:
-        ok(f"Profil a2dp-sink activé sur {card}")
+        ok(f"Profil a2dp_sink activé sur {card}")
     else:
         detail = error or "(pas de message d'erreur)"
         warn(f"Échec de set-card-profile pour {card} : {detail}")
