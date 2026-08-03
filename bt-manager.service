@@ -6,7 +6,7 @@ Requires=bluetooth.service
 [Service]
 Type=simple
 User=pi
-ExecStart=/home/pi/raspberry_bluetooth_autoconnect/bt-manager.sh
+ExecStart=/usr/bin/python3 -u /home/pi/raspberry_bluetooth_autoconnect/bt_manager.py
 Restart=always
 
 # Désactiver la sandbox systemd

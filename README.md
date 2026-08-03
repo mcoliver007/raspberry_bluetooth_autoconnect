@@ -1,21 +1,34 @@
 # raspberry_bluetooth_autoconnect
 
 Reconnexion automatique à une enceinte Bluetooth préférée sur Raspberry Pi
-(scan en boucle, connexion A2DP, confirmation vocale), dès le boot et à
-chaque perte de connexion.
+(connexion A2DP, confirmation vocale), dès le boot et à chaque perte de
+connexion.
+
+**Branche `claude/python-dbus-rewrite`** : réécriture expérimentale en
+Python, parlant directement à `bluetoothd` via D-Bus au lieu de scripter
+`bluetoothctl` en bash. `bluetoothctl` est un outil interactif pensé pour un
+humain, pas pour être piloté par script (parsing de texte asynchrone, agent
+SSP implicite non contrôlable) — voir `bluez_dbus.py` pour le détail du
+raisonnement. Cette branche n'a pas encore été validée sur le matériel réel
+(contrairement à `main`) ; ne pas merger avant test complet sur un Pi.
+
+Nouvelle dépendance : `sudo apt install python3-dbus python3-gi`
 
 ## Fichiers du dépôt
 
 | Fichier | Rôle |
 |---|---|
-| `bt-manager.sh` | Boucle principale : scan Bluetooth, connexion à la première enceinte préférée trouvée, activation du profil audio A2DP, confirmation vocale, puis surveillance jusqu'à la perte de connexion. Tourne en continu comme service systemd. |
-| `bt-manager.service` | Unité systemd qui lance `bt-manager.sh` au boot et le relance automatiquement (`Restart=always`). |
-| `bt-setup.sh` | Assistant interactif à lancer manuellement : découverte, sélection, nettoyage d'un appairage précédent, appairage, trust, connexion et essai sonore. À utiliser pour ajouter/déboguer une enceinte, pas pour l'usage courant. |
+| `bluez_dbus.py` | Module partagé : contrôleur BlueZ via D-Bus (découverte, pairing, trust, connexion), agent SSP unique auto-acceptant. |
+| `bt_manager.py` | Boucle principale : connexion directe à la première enceinte préférée trouvée (sans scan préalable), activation du profil audio A2DP, confirmation vocale, puis surveillance jusqu'à la perte de connexion. Tourne en continu comme service systemd. |
+| `bt-manager.service` | Unité systemd qui lance `bt_manager.py` au boot et le relance automatiquement (`Restart=always`). |
+| `bt_setup.py` | Assistant interactif à lancer manuellement : diagnostics système, découverte, appairage (seulement si nécessaire), connexion, profil audio A2DP, essai sonore. À utiliser pour ajouter/déboguer une enceinte, pas pour l'usage courant. |
 | `~/.config/bt-preferred.conf` (hors dépôt) | Liste des adresses MAC préférées, une par ligne, par ordre de priorité. Commentaires `#` et texte après `#` sur une ligne ignorés. |
 
 ## Installation
 
 ```bash
+sudo apt install python3-dbus python3-gi
+
 git clone <ce dépôt> /home/pi/raspberry_bluetooth_autoconnect
 cd /home/pi/raspberry_bluetooth_autoconnect
 
@@ -26,7 +39,7 @@ AA:BB:CC:DD:EE:FF   # Nom de l'enceinte
 EOF
 
 # Appairer l'enceinte une première fois
-./bt-setup.sh
+./bt_setup.py
 
 # Installer le service
 sudo cp bt-manager.service /etc/systemd/system/bt-manager.service
@@ -39,7 +52,7 @@ sudo systemctl enable --now bt-manager
 La confirmation vocale à la connexion utilise en priorité le serveur
 [Piper TTS local](https://github.com/mcoliver007/raspberry_test_synthese_vocale)
 (service `systemd --user piper-tts.service`, 100% offline, voix naturelle).
-S'il n'est pas installé/démarré, `bt-manager.sh` retombe automatiquement sur
+S'il n'est pas installé/démarré, `bt_manager.py` retombe automatiquement sur
 `espeak-ng` (voix plus robotique mais sans dépendance), puis sur un simple bip
 si `espeak-ng` n'est pas non plus disponible. Aucune des deux n'est requise
 pour que la reconnexion Bluetooth fonctionne.
@@ -48,7 +61,7 @@ pour que la reconnexion Bluetooth fonctionne.
 
 Le service tourne seul, sans intervention. Pour ajouter une nouvelle enceinte
 ou une nouvelle MAC de secours, l'ajouter dans `bt-preferred.conf` (l'ordre
-des lignes = ordre de priorité), puis relancer `bt-setup.sh` pour l'appairer.
+des lignes = ordre de priorité), puis relancer `bt_setup.py` pour l'appairer.
 
 Logs en direct :
 ```bash
@@ -99,8 +112,8 @@ Regarder `journalctl -u bluetooth` au moment de l'échec :
   sudo reboot
   ```
 - **État bloqué après une mise en veille de l'enceinte** (`Host is down`
-  en boucle) : relancer `./bt-setup.sh`, qui fait un `remove` avant de
-  ré-appairer, ce qui nettoie l'état.
+  en boucle) : relancer `./bt_setup.py`, qui bascule automatiquement sur un
+  `remove` + ré-appairage si la connexion échoue malgré un appairage existant.
 
 ### Aucun son ne sort de l'enceinte (Bluetooth connecté, mais muet)
 
