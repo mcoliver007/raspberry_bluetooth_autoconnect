@@ -82,12 +82,15 @@ def wait_for_pactl_object(kind: str, name: str, attempts: int = 5) -> bool:
     return False
 
 
-def retry_pactl(cmd: list[str], attempts: int = 5) -> bool:
+def retry_pactl(cmd: list[str], attempts: int = 5) -> tuple[bool, str]:
+    last_error = ""
     for _ in range(attempts):
-        if subprocess.run(cmd, capture_output=True).returncode == 0:
-            return True
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return True, ""
+        last_error = result.stderr.strip()
         time.sleep(1)
-    return False
+    return False, last_error
 
 
 def read_preferred_macs() -> list[str]:
@@ -120,14 +123,18 @@ def activate_a2dp(mac: str) -> None:
     # PulseAudio après la connexion.
     if not wait_for_pactl_object("cards", card):
         log(f"DEBUG: carte {card} absente après 5s")
-    if not retry_pactl(["pactl", "set-card-profile", card, "a2dp-sink"]):
-        log(f"DEBUG: échec set-card-profile pour {card}")
+    success, error = retry_pactl(["pactl", "set-card-profile", card, "a2dp-sink"])
+    if not success:
+        detail = error or "(pas de message d'erreur)"
+        log(f"DEBUG: échec set-card-profile pour {card} : {detail}")
 
     # Le sink A2DP n'apparaît qu'après le changement de profil de la carte.
     if not wait_for_pactl_object("sinks", sink):
         log(f"DEBUG: sink {sink} absent après 5s")
-    if not retry_pactl(["pactl", "set-default-sink", sink]):
-        log(f"DEBUG: échec set-default-sink pour {sink}")
+    success, error = retry_pactl(["pactl", "set-default-sink", sink])
+    if not success:
+        detail = error or "(pas de message d'erreur)"
+        log(f"DEBUG: échec set-default-sink pour {sink} : {detail}")
 
     # Changer le sink par défaut ne redirige pas les flux audio déjà ouverts
     # (ex: le process aplay persistant d'un serveur TTS lancé avant cette

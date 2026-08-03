@@ -126,12 +126,15 @@ def wait_for_pactl_object(kind: str, name: str, attempts: int = 5) -> bool:
     return False
 
 
-def retry_pactl(cmd: list[str], attempts: int = 5) -> bool:
+def retry_pactl(cmd: list[str], attempts: int = 5) -> tuple[bool, str]:
+    last_error = ""
     for _ in range(attempts):
-        if subprocess.run(cmd, capture_output=True).returncode == 0:
-            return True
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return True, ""
+        last_error = result.stderr.strip()
         time.sleep(1)
-    return False
+    return False, last_error
 
 
 def do_pair(bt: BlueZController, mac: str) -> bool:
@@ -171,17 +174,21 @@ def setup_audio(mac: str, name: str) -> None:
     print("=== Sélection du profil A2DP et du sink audio ===")
     if not wait_for_pactl_object("cards", card):
         warn(f"Carte {card} absente après 5s d'attente.")
-    if retry_pactl(["pactl", "set-card-profile", card, "a2dp-sink"]):
+    success, error = retry_pactl(["pactl", "set-card-profile", card, "a2dp-sink"])
+    if success:
         ok(f"Profil a2dp-sink activé sur {card}")
     else:
-        warn(f"Échec de set-card-profile pour {card}.")
+        detail = error or "(pas de message d'erreur)"
+        warn(f"Échec de set-card-profile pour {card} : {detail}")
 
     if not wait_for_pactl_object("sinks", sink):
         warn(f"Sink {sink} absent après 5s d'attente.")
-    if retry_pactl(["pactl", "set-default-sink", sink]):
+    success, error = retry_pactl(["pactl", "set-default-sink", sink])
+    if success:
         ok(f"Sink par défaut : {sink}")
     else:
-        warn(f"Échec de set-default-sink pour {sink}.")
+        detail = error or "(pas de message d'erreur)"
+        warn(f"Échec de set-default-sink pour {sink} : {detail}")
 
     # Changer le sink par défaut ne redirige pas les flux audio déjà ouverts
     # (ex: le process aplay persistant d'un serveur TTS lancé bien avant
